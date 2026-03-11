@@ -87,8 +87,8 @@ jobs:
       - name: Create or update Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
-          branch: $PROMO_BRANCH
-          base: $TARGET_BRANCH
+          branch: ${{ env.PROMO_BRANCH }}
+          base: ${{ env.TARGET_BRANCH }}
           title: "Promote proxy ${{ env.PROXY_NAME }} (${{ env.COMMIT_HASH }}) from ${{ env.SOURCE_BRANCH }} → ${{ env.TARGET_BRANCH }}"
           body: |
             Automated promotion of proxy `${{ env.PROXY_NAME }}` (commit `${{ env.COMMIT_HASH }}`) 
