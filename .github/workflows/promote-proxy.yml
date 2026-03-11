@@ -89,6 +89,7 @@ jobs:
         with:
           branch: $PROMO_BRANCH
           base: $TARGET_BRANCH
-          title: "Promote proxy $PROXY_NAME ($COMMIT_HASH) from $SOURCE_BRANCH → $TARGET_BRANCH"
+          title: "Promote proxy ${{ env.PROXY_NAME }} (${{ env.COMMIT_HASH }}) from ${{ env.SOURCE_BRANCH }} → ${{ env.TARGET_BRANCH }}"
           body: |
-            Automated promotion of proxy `$PROXY_NAME` (commit `$COMMIT_HASH`) from `$SOURCE_BRANCH` to `$TARGET_BRANCH`.
+            Automated promotion of proxy `${{ env.PROXY_NAME }}` (commit `${{ env.COMMIT_HASH }}`) 
+            from `${{ env.SOURCE_BRANCH }}` to `${{ env.TARGET_BRANCH }}`.
