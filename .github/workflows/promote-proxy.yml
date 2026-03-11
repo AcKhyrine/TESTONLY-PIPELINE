@@ -1,28 +1,111 @@
-name: Promote Proxy Commit (SIT/UAT → Target)
+# name: Promote Proxy Commit (SIT/UAT → Target)
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       source_branch:
+#         description: "Source branch (SIT or UAT)"
+#         required: true
+#         type: string
+#       target_branch:
+#         description: "Target branch (UAT or MAIN)"
+#         required: true
+#         type: string
+#       commit_hash:
+#         description: "Commit hash to promote"
+#         required: true
+#         type: string
+#       proxy_name:
+#         description: "Proxy folder name to promote"
+#         required: true
+#         type: string
+
+# permissions:
+#   contents: write
+#   pull-requests: write
+
+# jobs:
+#   promote:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+
+#       - name: Set environment variables
+#         run: |
+#           echo "SOURCE_BRANCH=${{ inputs.source_branch }}" >> $GITHUB_ENV
+#           echo "TARGET_BRANCH=${{ inputs.target_branch }}" >> $GITHUB_ENV
+#           echo "COMMIT_HASH=${{ inputs.commit_hash }}" >> $GITHUB_ENV
+#           echo "PROXY_NAME=${{ inputs.proxy_name }}" >> $GITHUB_ENV
+#           echo "PROMO_BRANCH=promotion/${{ inputs.commit_hash }}" >> $GITHUB_ENV
+
+#       - name: Validate allowed promotion paths
+#         run: |
+#           if [[ "$SOURCE_BRANCH" == "release/sit" && "$TARGET_BRANCH" != "release/uat" && "$TARGET_BRANCH" != "main" ]]; then
+#             echo "::error::Invalid promotion: SIT can only go to UAT or MAIN"
+#             exit 1
+#           fi
+#           if [[ "$SOURCE_BRANCH" == "release/uat" && "$TARGET_BRANCH" != "main" ]]; then
+#             echo "::error::Invalid promotion: UAT can only go to MAIN"
+#             exit 1
+#           fi
+
+#       - name: Fetch branches
+#         run: |
+#           git fetch origin $SOURCE_BRANCH
+#           git fetch origin $TARGET_BRANCH
+
+#       - name: Delete old promotion branch if exists
+#         run: |
+#           git push origin --delete $PROMO_BRANCH || true
+#           git checkout -B $PROMO_BRANCH origin/$TARGET_BRANCH
+
+#       - name: Set git committer info
+#         run: |
+#           git config user.name "github-actions"
+#           git config user.email "github-actions@users.noreply.github.com"
+
+#       - name: Cherry-pick only proxy folder
+#         run: |
+#           # Cherry-pick the commit but only apply files in the proxy folder
+#           git checkout $COMMIT_HASH -- src/main/apiproxies/$PROXY_NAME || true
+#           git add src/main/apiproxies/$PROXY_NAME
+          
+#           if git diff --cached --quiet; then
+#             echo "::warning::No changes detected for proxy $PROXY_NAME"
+#             exit 0
+#           fi
+          
+#           git commit -m "Promote $PROXY_NAME from $SOURCE_BRANCH → $TARGET_BRANCH" || true
+
+#       - name: Push promotion branch
+#         run: git push origin $PROMO_BRANCH --force
+
+#       - name: Create or update Pull Request
+#         uses: peter-evans/create-pull-request@v6
+#         with:
+#           branch: ${{ env.PROMO_BRANCH }}
+#           base: ${{ env.TARGET_BRANCH }}
+#           title: "Promote proxy ${{ env.PROXY_NAME }} (${{ env.COMMIT_HASH }}) from ${{ env.SOURCE_BRANCH }} → ${{ env.TARGET_BRANCH }}"
+#           body: |
+#             Automated promotion of proxy `${{ env.PROXY_NAME }}` (commit `${{ env.COMMIT_HASH }}`) 
+#             from `${{ env.SOURCE_BRANCH }}` to `${{ env.TARGET_BRANCH }}`.
+
+name: Promote Commit
 
 on:
   workflow_dispatch:
     inputs:
-      source_branch:
-        description: "Source branch (SIT or UAT)"
-        required: true
-        type: string
       target_branch:
-        description: "Target branch (UAT or MAIN)"
+        description: 'Where to promote? (release/uat or rmain)'
         required: true
-        type: string
+        default: 'release/uat'
       commit_hash:
-        description: "Commit hash to promote"
+        description: 'Commit hash to promote'
         required: true
-        type: string
-      proxy_name:
-        description: "Proxy folder name to promote"
-        required: true
-        type: string
-
-permissions:
-  contents: write
-  pull-requests: write
 
 jobs:
   promote:
@@ -31,65 +114,36 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set environment variables
+      - name: Set variables
+        id: vars
         run: |
-          echo "SOURCE_BRANCH=${{ inputs.source_branch }}" >> $GITHUB_ENV
-          echo "TARGET_BRANCH=${{ inputs.target_branch }}" >> $GITHUB_ENV
-          echo "COMMIT_HASH=${{ inputs.commit_hash }}" >> $GITHUB_ENV
-          echo "PROXY_NAME=${{ inputs.proxy_name }}" >> $GITHUB_ENV
-          echo "PROMO_BRANCH=promotion/${{ inputs.commit_hash }}" >> $GITHUB_ENV
+          echo "TARGET_BRANCH=${{ github.event.inputs.target_branch }}" >> $GITHUB_ENV
+          echo "COMMIT_HASH=${{ github.event.inputs.commit_hash }}" >> $GITHUB_ENV
+          # Create a promotion branch name
+          PROMOTE_BRANCH="promote-${GITHUB_SHA:0:7}"
+          echo "PROMOTE_BRANCH=$PROMOTE_BRANCH" >> $GITHUB_ENV
 
-      - name: Validate allowed promotion paths
-        run: |
-          if [[ "$SOURCE_BRANCH" == "release/sit" && "$TARGET_BRANCH" != "release/uat" && "$TARGET_BRANCH" != "main" ]]; then
-            echo "::error::Invalid promotion: SIT can only go to UAT or MAIN"
-            exit 1
-          fi
-          if [[ "$SOURCE_BRANCH" == "release/uat" && "$TARGET_BRANCH" != "main" ]]; then
-            echo "::error::Invalid promotion: UAT can only go to MAIN"
-            exit 1
-          fi
+      - name: Fetch all branches
+        run: git fetch --all
 
-      - name: Fetch branches
-        run: |
-          git fetch origin $SOURCE_BRANCH
-          git fetch origin $TARGET_BRANCH
+      - name: Checkout target branch
+        run: git checkout $TARGET_BRANCH && git pull origin $TARGET_BRANCH
 
-      - name: Delete old promotion branch if exists
-        run: |
-          git push origin --delete $PROMO_BRANCH || true
-          git checkout -B $PROMO_BRANCH origin/$TARGET_BRANCH
+      - name: Create promotion branch
+        run: git checkout -b $PROMOTE_BRANCH
 
-      - name: Set git committer info
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-
-      - name: Cherry-pick only proxy folder
-        run: |
-          # Cherry-pick the commit but only apply files in the proxy folder
-          git checkout $COMMIT_HASH -- src/main/apiproxies/$PROXY_NAME || true
-          git add src/main/apiproxies/$PROXY_NAME
-          
-          if git diff --cached --quiet; then
-            echo "::warning::No changes detected for proxy $PROXY_NAME"
-            exit 0
-          fi
-          
-          git commit -m "Promote $PROXY_NAME from $SOURCE_BRANCH → $TARGET_BRANCH" || true
+      - name: Cherry-pick commit
+        run: git cherry-pick $COMMIT_HASH
 
       - name: Push promotion branch
-        run: git push origin $PROMO_BRANCH --force
+        run: git push origin $PROMOTE_BRANCH
 
-      - name: Create or update Pull Request
-        uses: peter-evans/create-pull-request@v6
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
         with:
-          branch: ${{ env.PROMO_BRANCH }}
-          base: ${{ env.TARGET_BRANCH }}
-          title: "Promote proxy ${{ env.PROXY_NAME }} (${{ env.COMMIT_HASH }}) from ${{ env.SOURCE_BRANCH }} → ${{ env.TARGET_BRANCH }}"
-          body: |
-            Automated promotion of proxy `${{ env.PROXY_NAME }}` (commit `${{ env.COMMIT_HASH }}`) 
-            from `${{ env.SOURCE_BRANCH }}` to `${{ env.TARGET_BRANCH }}`.
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: $TARGET_BRANCH
+          head: $PROMOTE_BRANCH
+          title: "Promote commit $COMMIT_HASH to $TARGET_BRANCH"
+          body: "Automated promotion of commit $COMMIT_HASH to $TARGET_BRANCH"
