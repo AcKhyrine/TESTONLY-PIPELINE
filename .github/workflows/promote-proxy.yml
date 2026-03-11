@@ -1,4 +1,4 @@
-name: Promote Commit (SIT/UAT → Target)
+name: Promote Proxy Commit (SIT/UAT → Target)
 
 on:
   workflow_dispatch:
@@ -13,6 +13,10 @@ on:
         type: string
       commit_hash:
         description: "Commit hash to promote"
+        required: true
+        type: string
+      proxy_name:
+        description: "Proxy folder name to promote"
         required: true
         type: string
 
@@ -35,6 +39,7 @@ jobs:
           echo "SOURCE_BRANCH=${{ inputs.source_branch }}" >> $GITHUB_ENV
           echo "TARGET_BRANCH=${{ inputs.target_branch }}" >> $GITHUB_ENV
           echo "COMMIT_HASH=${{ inputs.commit_hash }}" >> $GITHUB_ENV
+          echo "PROXY_NAME=${{ inputs.proxy_name }}" >> $GITHUB_ENV
           echo "PROMO_BRANCH=promotion/${{ inputs.commit_hash }}" >> $GITHUB_ENV
 
       - name: Validate allowed promotion paths
@@ -43,7 +48,6 @@ jobs:
             echo "::error::Invalid promotion: SIT can only go to UAT or MAIN"
             exit 1
           fi
-
           if [[ "$SOURCE_BRANCH" == "release/uat" && "$TARGET_BRANCH" != "main" ]]; then
             echo "::error::Invalid promotion: UAT can only go to MAIN"
             exit 1
@@ -54,37 +58,28 @@ jobs:
           git fetch origin $SOURCE_BRANCH
           git fetch origin $TARGET_BRANCH
 
-      - name: Create promotion branch from target
+      - name: Delete old promotion branch if exists
         run: |
+          git push origin --delete $PROMO_BRANCH || true
           git checkout -B $PROMO_BRANCH origin/$TARGET_BRANCH
 
-      - name: Handle missing proxies
+      - name: Set git committer info
         run: |
-          PROXY_PATH="src/main/apiproxies/test-proxy-8"
-          
-          # Check if proxy exists in target branch
-          if [ ! -d "$PROXY_PATH" ]; then
-            echo "Proxy folder $PROXY_PATH does not exist in $TARGET_BRANCH."
-            
-            # Get the commit type (example: fix or addition)
-            # Here we just check the commit message contains 'fix'
-            COMMIT_MSG=$(git log -1 --pretty=%B $COMMIT_HASH)
-            echo "Commit message: $COMMIT_MSG"
-            
-            if echo "$COMMIT_MSG" | grep -iq "fix"; then
-              echo "Commit is a fix. Copying full proxy folder from $SOURCE_BRANCH..."
-              git checkout $SOURCE_BRANCH -- "$PROXY_PATH"
-              git add "$PROXY_PATH"
-            else
-              echo "Commit is not a fix. Skipping missing proxy."
-            fi
-          fi
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
 
-      - name: Cherry-pick the commit
+      - name: Cherry-pick only proxy folder
         run: |
-           git config user.name "github-actions"
-           git config user.email "github-actions@users.noreply.github.com"
-           git cherry-pick $COMMIT_HASH || { echo "::error::Cherry-pick failed. Resolve conflicts manually."; exit 1; }
+          # Cherry-pick the commit but only apply files in the proxy folder
+          git checkout $COMMIT_HASH -- src/main/apiproxies/$PROXY_NAME || true
+          git add src/main/apiproxies/$PROXY_NAME
+          
+          if git diff --cached --quiet; then
+            echo "::warning::No changes detected for proxy $PROXY_NAME"
+            exit 0
+          fi
+          
+          git commit -m "Promote $PROXY_NAME from $SOURCE_BRANCH → $TARGET_BRANCH" || true
 
       - name: Push promotion branch
         run: git push origin $PROMO_BRANCH --force
@@ -94,7 +89,7 @@ jobs:
         with:
           branch: $PROMO_BRANCH
           base: $TARGET_BRANCH
-          title: "Promote commit $COMMIT_HASH from $SOURCE_BRANCH → $TARGET_BRANCH"
+          title: "Promote proxy $PROXY_NAME ($COMMIT_HASH) from $SOURCE_BRANCH → $TARGET_BRANCH"
           body: |
-            Automated promotion of commit `$COMMIT_HASH` from branch `$SOURCE_BRANCH` to `$TARGET_BRANCH`.
+            Automated promotion of proxy `$PROXY_NAME` (commit `$COMMIT_HASH`) from `$SOURCE_BRANCH` to `$TARGET_BRANCH`.
           create-if-empty: true
