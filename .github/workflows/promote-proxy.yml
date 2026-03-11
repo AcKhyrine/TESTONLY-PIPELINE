@@ -94,6 +94,65 @@
 #             Automated promotion of proxy `${{ env.PROXY_NAME }}` (commit `${{ env.COMMIT_HASH }}`) 
 #             from `${{ env.SOURCE_BRANCH }}` to `${{ env.TARGET_BRANCH }}`.
 
+# name: Promote Commit
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       target_branch:
+#         description: 'Where to promote? (release/uat or rmain)'
+#         required: true
+#         default: 'release/uat'
+#       commit_hash:
+#         description: 'Commit hash to promote'
+#         required: true
+
+# jobs:
+#   promote:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+
+#       - name: Set variables
+#         id: vars
+#         run: |
+#           echo "TARGET_BRANCH=${{ github.event.inputs.target_branch }}" >> $GITHUB_ENV
+#           echo "COMMIT_HASH=${{ github.event.inputs.commit_hash }}" >> $GITHUB_ENV
+#           # Create a promotion branch name
+#           PROMOTE_BRANCH="promote-${GITHUB_SHA:0:7}"
+#           echo "PROMOTE_BRANCH=$PROMOTE_BRANCH" >> $GITHUB_ENV
+
+#       - name: Fetch all branches
+#         run: git fetch --all
+
+#       - name: Checkout target branch
+#         run: git checkout $TARGET_BRANCH && git pull origin $TARGET_BRANCH
+
+#       - name: Create promotion branch
+#         run: git checkout -b $PROMOTE_BRANCH
+
+#       - name: Set Git user
+#         run: |
+#           git config user.name "github-actions"
+#           git config user.email "github-actions@users.noreply.github.com"
+
+#       - name: Cherry-pick commit
+#         run: git cherry-pick $COMMIT_HASH
+
+#       - name: Push promotion branch
+#         run: git push origin $PROMOTE_BRANCH
+
+#       - name: Create Pull Request
+#         uses: peter-evans/create-pull-request@v5
+#         with:
+#           token: ${{ secrets.GITHUB_TOKEN }}
+#           base: ${{ github.event.inputs.target_branch }}
+#           branch: ${{ steps.prep.outputs.promote_branch }}
+#           title: "Promote commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
+#           body: "Automated promotion of commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
+
 name: Promote Commit
 
 on:
@@ -114,24 +173,26 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # fetch all history for cherry-pick and PRs
 
       - name: Set variables
         id: vars
         run: |
           echo "TARGET_BRANCH=${{ github.event.inputs.target_branch }}" >> $GITHUB_ENV
           echo "COMMIT_HASH=${{ github.event.inputs.commit_hash }}" >> $GITHUB_ENV
-          # Create a promotion branch name
           PROMOTE_BRANCH="promote-${GITHUB_SHA:0:7}"
           echo "PROMOTE_BRANCH=$PROMOTE_BRANCH" >> $GITHUB_ENV
 
       - name: Fetch all branches
-        run: git fetch --all
+        run: git fetch origin '+refs/heads/*:refs/remotes/origin/*'
 
       - name: Checkout target branch
-        run: git checkout $TARGET_BRANCH && git pull origin $TARGET_BRANCH
+        run: |
+          git checkout -B "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
 
       - name: Create promotion branch
-        run: git checkout -b $PROMOTE_BRANCH
+        run: git checkout -b "$PROMOTE_BRANCH"
 
       - name: Set Git user
         run: |
@@ -139,16 +200,16 @@ jobs:
           git config user.email "github-actions@users.noreply.github.com"
 
       - name: Cherry-pick commit
-        run: git cherry-pick $COMMIT_HASH
+        run: git cherry-pick "$COMMIT_HASH"
 
       - name: Push promotion branch
-        run: git push origin $PROMOTE_BRANCH
+        run: git push origin "$PROMOTE_BRANCH"
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           base: ${{ github.event.inputs.target_branch }}
-          branch: ${{ steps.prep.outputs.promote_branch }}
+          head: "$PROMOTE_BRANCH"
           title: "Promote commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
           body: "Automated promotion of commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
