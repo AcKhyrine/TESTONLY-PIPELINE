@@ -58,6 +58,28 @@ jobs:
         run: |
           git checkout -B $PROMO_BRANCH origin/$TARGET_BRANCH
 
+      - name: Handle missing proxies
+        run: |
+          PROXY_PATH="src/main/apiproxies/test-proxy-8"
+          
+          # Check if proxy exists in target branch
+          if [ ! -d "$PROXY_PATH" ]; then
+            echo "Proxy folder $PROXY_PATH does not exist in $TARGET_BRANCH."
+            
+            # Get the commit type (example: fix or addition)
+            # Here we just check the commit message contains 'fix'
+            COMMIT_MSG=$(git log -1 --pretty=%B $COMMIT_HASH)
+            echo "Commit message: $COMMIT_MSG"
+            
+            if echo "$COMMIT_MSG" | grep -iq "fix"; then
+              echo "Commit is a fix. Copying full proxy folder from $SOURCE_BRANCH..."
+              git checkout $SOURCE_BRANCH -- "$PROXY_PATH"
+              git add "$PROXY_PATH"
+            else
+              echo "Commit is not a fix. Skipping missing proxy."
+            fi
+          fi
+
       - name: Cherry-pick the commit
         run: |
           git cherry-pick $COMMIT_HASH || { echo "::error::Cherry-pick failed. Resolve conflicts manually."; exit 1; }
