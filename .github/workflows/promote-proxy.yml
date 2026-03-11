@@ -181,13 +181,14 @@ jobs:
       - name: Check proxy folder
         run: |
           PROXY="${{ github.event.inputs.proxy_name }}"
-          if [ ! -d "proxies/$PROXY" ]; then
-            echo "❌ Proxy $PROXY does not exist!"
+          PROXY_PATH="src/main/apiproxies/$PROXY"
+          if [ ! -d "$PROXY_PATH" ]; then
+            echo "❌ Proxy $PROXY does not exist in $PROXY_PATH!"
             exit 1
           fi
-          echo "✅ Proxy $PROXY found."
+          echo "✅ Proxy $PROXY found in $PROXY_PATH."
           echo "Listing files included:"
-          ls -1 "proxies/$PROXY"
+          ls -1 "$PROXY_PATH"
 
       # 3. Collect commit info (optional)
       - name: Collect commit info
@@ -208,9 +209,8 @@ jobs:
             const proxy = "${{ github.event.inputs.proxy_name }}";
             const commit = "${{ github.event.inputs.commit_hash }}";
 
-            // Example: list files in the proxy folder
             const { execSync } = require('child_process');
-            const files = execSync(`ls -1 proxies/${proxy}`).toString().trim().split("\n");
+            const files = execSync(`ls -1 src/main/apiproxies/${proxy}`).toString().trim().split("\n");
 
             let message = `🔍 **Preview of proxy to be deployed**\n\n- Proxy: ${proxy}\n`;
             if (commit) message += `- Commit hash: ${commit}\n`;
