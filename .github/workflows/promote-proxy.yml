@@ -1,0 +1,76 @@
+name: Promote Commit (SIT/UAT → Target)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "Source branch (SIT or UAT)"
+        required: true
+        type: string
+      target_branch:
+        description: "Target branch (UAT or MAIN)"
+        required: true
+        type: string
+      commit_hash:
+        description: "Commit hash to promote"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set environment variables
+        run: |
+          echo "SOURCE_BRANCH=${{ inputs.source_branch }}" >> $GITHUB_ENV
+          echo "TARGET_BRANCH=${{ inputs.target_branch }}" >> $GITHUB_ENV
+          echo "COMMIT_HASH=${{ inputs.commit_hash }}" >> $GITHUB_ENV
+          echo "PROMO_BRANCH=promotion/${{ inputs.commit_hash }}" >> $GITHUB_ENV
+
+      - name: Validate allowed promotion paths
+        run: |
+          if [[ "$SOURCE_BRANCH" == "release/sit" && "$TARGET_BRANCH" != "release/uat" && "$TARGET_BRANCH" != "main" ]]; then
+            echo "::error::Invalid promotion: SIT can only go to UAT or MAIN"
+            exit 1
+          fi
+
+          if [[ "$SOURCE_BRANCH" == "release/uat" && "$TARGET_BRANCH" != "main" ]]; then
+            echo "::error::Invalid promotion: UAT can only go to MAIN"
+            exit 1
+          fi
+
+      - name: Fetch branches
+        run: |
+          git fetch origin $SOURCE_BRANCH
+          git fetch origin $TARGET_BRANCH
+
+      - name: Create promotion branch from target
+        run: |
+          git checkout -B $PROMO_BRANCH origin/$TARGET_BRANCH
+
+      - name: Cherry-pick the commit
+        run: |
+          git cherry-pick $COMMIT_HASH || { echo "::error::Cherry-pick failed. Resolve conflicts manually."; exit 1; }
+
+      - name: Push promotion branch
+        run: git push origin $PROMO_BRANCH --force
+
+      - name: Create or update Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: $PROMO_BRANCH
+          base: $TARGET_BRANCH
+          title: "Promote commit $COMMIT_HASH from $SOURCE_BRANCH → $TARGET_BRANCH"
+          body: |
+            Automated promotion of commit `$COMMIT_HASH` from branch `$SOURCE_BRANCH` to `$TARGET_BRANCH`.
+          create-if-empty: true
