@@ -153,63 +153,73 @@
 #           title: "Promote commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
 #           body: "Automated promotion of commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
 
-name: Promote Commit
+name: PR Proxy Preview
 
 on:
   workflow_dispatch:
     inputs:
-      target_branch:
-        description: 'Where to promote? (release/uat or rmain)'
+      proxy_name:
+        description: "Name of the proxy to preview"
         required: true
-        default: 'release/uat'
       commit_hash:
-        description: 'Commit hash to promote'
+        description: "Optional: commit hash to reference a specific build"
+        required: false
+      pr_number:
+        description: "PR number to post the preview message"
         required: true
 
 jobs:
-  promote:
+  preview-proxy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      # 1. Checkout repo
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2. Validate proxy exists
+      - name: Check proxy folder
+        run: |
+          PROXY="${{ github.event.inputs.proxy_name }}"
+          if [ ! -d "proxies/$PROXY" ]; then
+            echo "❌ Proxy $PROXY does not exist!"
+            exit 1
+          fi
+          echo "✅ Proxy $PROXY found."
+          echo "Listing files included:"
+          ls -1 "proxies/$PROXY"
+
+      # 3. Collect commit info (optional)
+      - name: Collect commit info
+        run: |
+          if [ ! -z "${{ github.event.inputs.commit_hash }}" ]; then
+            echo "Commit hash provided: ${{ github.event.inputs.commit_hash }}"
+            git fetch --all
+            git show --stat ${{ github.event.inputs.commit_hash }}
+          fi
+
+      # 4. Post PR comment with preview
+      - name: Comment PR with proxy preview
+        uses: actions/github-script@v7
         with:
-          fetch-depth: 0  # fetch all history for cherry-pick and PRs
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr_number = parseInt("${{ github.event.inputs.pr_number }}");
+            const proxy = "${{ github.event.inputs.proxy_name }}";
+            const commit = "${{ github.event.inputs.commit_hash }}";
 
-      - name: Set variables
-        id: vars
-        run: |
-          echo "TARGET_BRANCH=${{ github.event.inputs.target_branch }}" >> $GITHUB_ENV
-          echo "COMMIT_HASH=${{ github.event.inputs.commit_hash }}" >> $GITHUB_ENV
-          PROMOTE_BRANCH="promote-${GITHUB_SHA:0:7}"
-          echo "PROMOTE_BRANCH=$PROMOTE_BRANCH" >> $GITHUB_ENV
+            // Example: list files in the proxy folder
+            const { execSync } = require('child_process');
+            const files = execSync(`ls -1 proxies/${proxy}`).toString().trim().split("\n");
 
-      - name: Fetch all branches
-        run: git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+            let message = `🔍 **Preview of proxy to be deployed**\n\n- Proxy: ${proxy}\n`;
+            if (commit) message += `- Commit hash: ${commit}\n`;
+            message += "\n**Files included:**\n";
+            files.forEach(f => message += `- ${f}\n`);
 
-      - name: Checkout target branch
-        run: |
-          git checkout -B "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
-
-      - name: Create promotion branch
-        run: git checkout -b "$PROMOTE_BRANCH"
-
-      - name: Set Git user
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-
-      - name: Cherry-pick commit
-        run: git cherry-pick "$COMMIT_HASH"
-
-      - name: Push promotion branch
-        run: git push origin "$PROMOTE_BRANCH"
-
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          base: ${{ github.event.inputs.target_branch }}
-          head: "$PROMOTE_BRANCH"
-          title: "Promote commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
-          body: "Automated promotion of commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr_number,
+              body: message
+            });
