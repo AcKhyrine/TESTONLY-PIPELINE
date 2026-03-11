@@ -153,81 +153,138 @@
 #           title: "Promote commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
 #           body: "Automated promotion of commit ${{ github.event.inputs.commit_hash }} to ${{ github.event.inputs.target_branch }}"
 
-name: PR Proxy Preview
+# name: PR Proxy Preview
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       proxy_name:
+#         description: "Name of the proxy to preview"
+#         required: true
+#       commit_hash:
+#         description: "Optional: commit hash to reference a specific build"
+#         required: false
+#       pr_number:
+#         description: "PR number to post the preview message"
+#         required: true
+
+# jobs:
+#   preview-proxy:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       # 1. Checkout the PR branch
+#       - name: Checkout PR branch
+#         uses: actions/checkout@v3
+#         with:
+#           ref: ${{ github.event.pull_request.head.ref }}
+
+#       # 2. Validate the proxy folder exists
+#       - name: Check proxy folder
+#         run: |
+#           PROXY="${{ github.event.inputs.proxy_name }}"
+#           PROXY_PATH="src/main/apiproxies/$PROXY"
+#           if [ ! -d "$PROXY_PATH" ]; then
+#             echo "❌ Proxy $PROXY does not exist in $PROXY_PATH!"
+#             exit 1
+#           fi
+#           echo "✅ Proxy $PROXY found in $PROXY_PATH."
+#           echo "Listing files included:"
+#           ls -1 "$PROXY_PATH"
+
+#       # 3. Optional: show commit info if commit hash provided
+#       - name: Collect commit info
+#         run: |
+#           if [ ! -z "${{ github.event.inputs.commit_hash }}" ]; then
+#             echo "Commit hash provided: ${{ github.event.inputs.commit_hash }}"
+#             git fetch --all
+#             git show --stat ${{ github.event.inputs.commit_hash }}
+#           fi
+
+#       # 4. Post preview comment on PR
+#       - name: Comment PR with proxy preview
+#         uses: actions/github-script@v7
+#         with:
+#           github-token: ${{ secrets.GITHUB_TOKEN }}
+#           script: |
+#             const pr_number = parseInt("${{ github.event.inputs.pr_number }}");
+#             const proxy = "${{ github.event.inputs.proxy_name }}";
+#             const commit = "${{ github.event.inputs.commit_hash }}";
+
+#             const { execSync } = require('child_process');
+#             const proxyPath = `src/main/apiproxies/${proxy}`;
+#             let files = [];
+#             try {
+#               files = execSync(`ls -1 ${proxyPath}`).toString().trim().split("\n");
+#             } catch (err) {
+#               files = ["(could not list files)"];
+#             }
+
+#             let message = `🔍 **Preview of proxy to be deployed**\n\n- Proxy: ${proxy}\n`;
+#             if (commit) message += `- Commit hash: ${commit}\n`;
+#             message += "\n**Files included:**\n";
+#             files.forEach(f => message += `- ${f}\n`);
+
+#             await github.rest.issues.createComment({
+#               owner: context.repo.owner,
+#               repo: context.repo.repo,
+#               issue_number: pr_number,
+#               body: message
+#             });
+
+
+# ano ba yan khyyyy
+
+name: "Surgical Proxy Promotion"
 
 on:
   workflow_dispatch:
     inputs:
       proxy_name:
-        description: "Name of the proxy to preview"
+        description: 'Name of the proxy to promote'
         required: true
-      commit_hash:
-        description: "Optional: commit hash to reference a specific build"
-        required: false
-      pr_number:
-        description: "PR number to post the preview message"
-        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
-  preview-proxy:
+  promote:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Checkout the PR branch
-      - name: Checkout PR branch
-        uses: actions/checkout@v3
+      - name: Checkout UAT (The Base)
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: release/uat
+          fetch-depth: 0
 
-      # 2. Validate the proxy folder exists
-      - name: Check proxy folder
+      - name: Create Promotion Branch
         run: |
-          PROXY="${{ github.event.inputs.proxy_name }}"
-          PROXY_PATH="src/main/apiproxies/$PROXY"
-          if [ ! -d "$PROXY_PATH" ]; then
-            echo "❌ Proxy $PROXY does not exist in $PROXY_PATH!"
-            exit 1
-          fi
-          echo "✅ Proxy $PROXY found in $PROXY_PATH."
-          echo "Listing files included:"
-          ls -1 "$PROXY_PATH"
+          BRANCH_NAME="promote/${{ github.event.inputs.proxy_name }}-${{ github.run_number }}"
+          git checkout -b $BRANCH_NAME
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
-      # 3. Optional: show commit info if commit hash provided
-      - name: Collect commit info
+      - name: Fetch and Copy from SIT
         run: |
-          if [ ! -z "${{ github.event.inputs.commit_hash }}" ]; then
-            echo "Commit hash provided: ${{ github.event.inputs.commit_hash }}"
-            git fetch --all
-            git show --stat ${{ github.event.inputs.commit_hash }}
-          fi
+          git fetch origin release/sit
+          # Surgically pull only the specific proxy folder
+          git checkout origin/release/sit -- src/main/apiproxies/${{ github.event.inputs.proxy_name }}
 
-      # 4. Post preview comment on PR
-      - name: Comment PR with proxy preview
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const pr_number = parseInt("${{ github.event.inputs.pr_number }}");
-            const proxy = "${{ github.event.inputs.proxy_name }}";
-            const commit = "${{ github.event.inputs.commit_hash }}";
+      - name: Commit and Push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .
+          git commit -m "Promoting ${{ github.event.inputs.proxy_name }} from SIT to UAT"
+          git push origin ${{ env.BRANCH_NAME }}
 
-            const { execSync } = require('child_process');
-            const proxyPath = `src/main/apiproxies/${proxy}`;
-            let files = [];
-            try {
-              files = execSync(`ls -1 ${proxyPath}`).toString().trim().split("\n");
-            } catch (err) {
-              files = ["(could not list files)"];
-            }
-
-            let message = `🔍 **Preview of proxy to be deployed**\n\n- Proxy: ${proxy}\n`;
-            if (commit) message += `- Commit hash: ${commit}\n`;
-            message += "\n**Files included:**\n";
-            files.forEach(f => message += `- ${f}\n`);
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr_number,
-              body: message
-            });
+      - name: Create Pull Request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --title "Promote: ${{ github.event.inputs.proxy_name }}" \
+            --body "Automated promotion of ${{ github.event.inputs.proxy_name }} from release/sit to release/uat." \
+            --base release/uat \
+            --head ${{ env.BRANCH_NAME }}
