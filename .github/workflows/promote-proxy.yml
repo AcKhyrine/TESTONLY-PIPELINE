@@ -173,11 +173,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repo
-      - name: Checkout code
+      # 1. Checkout the PR branch
+      - name: Checkout PR branch
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
 
-      # 2. Validate proxy exists
+      # 2. Validate the proxy folder exists
       - name: Check proxy folder
         run: |
           PROXY="${{ github.event.inputs.proxy_name }}"
@@ -190,7 +192,7 @@ jobs:
           echo "Listing files included:"
           ls -1 "$PROXY_PATH"
 
-      # 3. Collect commit info (optional)
+      # 3. Optional: show commit info if commit hash provided
       - name: Collect commit info
         run: |
           if [ ! -z "${{ github.event.inputs.commit_hash }}" ]; then
@@ -199,7 +201,7 @@ jobs:
             git show --stat ${{ github.event.inputs.commit_hash }}
           fi
 
-      # 4. Post PR comment with preview
+      # 4. Post preview comment on PR
       - name: Comment PR with proxy preview
         uses: actions/github-script@v7
         with:
@@ -210,7 +212,13 @@ jobs:
             const commit = "${{ github.event.inputs.commit_hash }}";
 
             const { execSync } = require('child_process');
-            const files = execSync(`ls -1 src/main/apiproxies/${proxy}`).toString().trim().split("\n");
+            const proxyPath = `src/main/apiproxies/${proxy}`;
+            let files = [];
+            try {
+              files = execSync(`ls -1 ${proxyPath}`).toString().trim().split("\n");
+            } catch (err) {
+              files = ["(could not list files)"];
+            }
 
             let message = `🔍 **Preview of proxy to be deployed**\n\n- Proxy: ${proxy}\n`;
             if (commit) message += `- Commit hash: ${commit}\n`;
