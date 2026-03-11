@@ -82,7 +82,9 @@ jobs:
 
       - name: Cherry-pick the commit
         run: |
-          git cherry-pick $COMMIT_HASH || { echo "::error::Cherry-pick failed. Resolve conflicts manually."; exit 1; }
+           git config user.name "github-actions"
+           git config user.email "github-actions@users.noreply.github.com"
+           git cherry-pick $COMMIT_HASH || { echo "::error::Cherry-pick failed. Resolve conflicts manually."; exit 1; }
 
       - name: Push promotion branch
         run: git push origin $PROMO_BRANCH --force
