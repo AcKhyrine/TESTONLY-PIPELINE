@@ -532,41 +532,44 @@ jobs:
           # Optional: create PR instead of direct push if you prefer
           # gh pr create --title "Promote ALL proxies" --body "Promoting ALL proxies from $SOURCE to $TARGET" --base $TARGET --head $TARGET
 
-      - name: Promote specific proxies (surgical)
-        if: env.ALL == 'false'
-        run: |
-          BRANCH_NAME="promote/${{ github.run_number }}"
-          git checkout -b $BRANCH_NAME
-
-          git fetch origin ${{ github.event.inputs.source_branch }}
-
-          CHANGED=0
-          for PROXY in $PROXIES; do
-              git checkout origin/${{ github.event.inputs.source_branch }} -- src/main/apiproxies/$PROXY || continue
-              git add src/main/apiproxies/$PROXY
-              if [[ -n "$(git diff --cached --name-only src/main/apiproxies/$PROXY)" ]]; then
-                  echo "$PROXY has changes"
-                  CHANGED=1
+          - name: Promote specific proxies (surgical)
+            id: surgical
+            run: |
+              BRANCH_NAME="promote/${{ github.run_number }}"
+              git checkout -b $BRANCH_NAME
+          
+              git fetch origin ${{ github.event.inputs.source_branch }}
+          
+              CHANGED=0
+              for PROXY in $PROXIES; do
+                  git checkout origin/${{ github.event.inputs.source_branch }} -- src/main/apiproxies/$PROXY || continue
+                  git add src/main/apiproxies/$PROXY
+                  if [[ -n "$(git diff --cached --name-only src/main/apiproxies/$PROXY)" ]]; then
+                      echo "$PROXY has changes"
+                      CHANGED=1
+                  fi
+              done
+          
+              if [[ "$CHANGED" == "0" ]]; then
+                  echo "No changes detected for selected proxies. Skipping commit and PR."
+                  echo "changed=0" >> $GITHUB_OUTPUT
+                  exit 0
               fi
-          done
-
-          if [[ "$CHANGED" == "0" ]]; then
-              echo "No changes detected for selected proxies. Skipping commit and PR."
-              exit 0
-          fi
-
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git commit -m "Promoting proxies: $PROXIES from ${{ github.event.inputs.source_branch }} to ${{ github.event.inputs.target_branch }}"
-          git push origin $BRANCH_NAME
+          
+              git config user.name "github-actions"
+              git config user.email "github-actions@github.com"
+              git commit -m "Promoting proxies: $PROXIES from ${{ github.event.inputs.source_branch }} to ${{ github.event.inputs.target_branch }}"
+              git push origin $BRANCH_NAME
+          
+              echo "changed=1" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request (surgical proxies only)
-        if: env.ALL == 'false' && steps.promote.outputs.CHANGED == '1'
+        if: steps.surgical.outputs.changed == '1'
         env:
-          GH_TOKEN: ${{ github.token }}
+                GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr create \
-            --title "Promote proxies: $PROXIES (${{ github.event.inputs.source_branch }} -> ${{ github.event.inputs.target_branch }})" \
-            --body "Automated surgical promotion of proxies: **$PROXIES** pulled from \`${{ github.event.inputs.source_branch }}\` into \`${{ github.event.inputs.target_branch }}\`." \
-            --base ${{ github.event.inputs.target_branch }} \
-            --head $BRANCH_NAME
+                gh pr create \
+                  --title "Promote proxies: $PROXIES (${{ github.event.inputs.source_branch }} -> ${{ github.event.inputs.target_branch }})" \
+                  --body "Automated surgical promotion of proxies: **$PROXIES** pulled from \`${{ github.event.inputs.source_branch }}\` into \`${{ github.event.inputs.target_branch }}\`." \
+                  --base ${{ github.event.inputs.target_branch }} \
+                  --head $BRANCH_NAME
