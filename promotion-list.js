@@ -1,5 +1,5 @@
 module.exports = {
   source: "sit",
-  target: "main",
-  proxies: ["proxy11", "proxy111"]
+  target: "prod",
+  proxies: ["test-proxy-2"]
 };
