@@ -520,9 +520,12 @@ jobs:
       - name: Promote ALL proxies (merge source into target)
         if: env.ALL == 'true'
         run: |
-          echo "Merging source branch ${{ github.event.inputs.source_branch }} into target branch ${{ github.event.inputs.target_branch }}"
           git checkout ${{ github.event.inputs.target_branch }}
           git pull origin ${{ github.event.inputs.target_branch }}
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
           git merge origin/${{ github.event.inputs.source_branch }} -m "Promoting ALL proxies from ${{ github.event.inputs.source_branch }} to ${{ github.event.inputs.target_branch }}"
           git push origin ${{ github.event.inputs.target_branch }}
 
