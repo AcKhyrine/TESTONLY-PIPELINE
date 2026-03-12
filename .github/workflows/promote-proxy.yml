@@ -551,26 +551,31 @@ jobs:
               git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: Proxy $PROXY not found in $SOURCE"
             done
 
-           # --- Determine proxies for promotion (works for ALL or surgical) ---
-          INPUT="${{ github.event.inputs.proxy_name }}"
-          INPUT=$(echo "$INPUT" | xargs)                 # trim spaces
-          UPPER_INPUT=$(echo "$INPUT" | tr '[:lower:]' '[:upper:]')
+           # --- Debug: show input ---
+          echo "DEBUG: Original input: '$INPUT'"
+          echo "DEBUG: Uppercase input: '$UPPER_INPUT'"
+          echo "DEBUG: Source branch: $SOURCE"
+          echo "DEBUG: Target branch: $TARGET"
           
+          # --- Determine proxies ---
           if [[ "$UPPER_INPUT" == "ALL" ]]; then
-              echo "Full Promotion: Using ALL proxies."
+              echo "DEBUG: Full Promotion detected."
               PROXIES=("ALL")
           else
-              echo "Surgical Promotion for: $INPUT"
+              echo "DEBUG: Surgical Promotion detected."
               IFS=',' read -r -a PROXIES <<< "$INPUT"
           fi
           
+          # --- Debug: show proxies array ---
+          echo "DEBUG: PROXIES array: ${PROXIES[@]}"
+          
           # --- Create/update promotion-list.js ---
           PROMOTION_FILE="promotion-list.js"
+          echo "DEBUG: Creating/updating $PROMOTION_FILE"
           echo "module.exports = {" > $PROMOTION_FILE
           echo "  source: \"${SOURCE#release/}\"," >> $PROMOTION_FILE
           echo "  target: \"${TARGET#release/}\"," >> $PROMOTION_FILE
           
-          # Build JS array
           PROXIES_JS="["
           for PROXY in "${PROXIES[@]}"; do
             PROXIES_JS+="\"$PROXY\", "
@@ -580,7 +585,20 @@ jobs:
           
           echo "  proxies: $PROXIES_JS" >> $PROMOTION_FILE
           echo "};" >> $PROMOTION_FILE
+          
+          # --- Debug: show file contents ---
+          echo "DEBUG: Contents of $PROMOTION_FILE:"
+          cat $PROMOTION_FILE
+          
+          # Stage the file for commit
           git add $PROMOTION_FILE
+          
+          # --- Debug: check if file exists and staged ---
+          if [[ -f "$PROMOTION_FILE" ]]; then
+              echo "DEBUG: $PROMOTION_FILE created successfully."
+          else
+              echo "DEBUG: $PROMOTION_FILE NOT created!"
+          fi
 
             # 6. Commit and Push
             git add .
