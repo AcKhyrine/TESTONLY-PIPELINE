@@ -550,6 +550,28 @@ jobs:
               git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: Proxy $PROXY not found in $SOURCE"
             done
 
+            # Create/Update promotion-list.js
+          echo "Creating promotion-list.js..."
+          PROMOTION_FILE="promotion-list.js"
+          echo "module.exports = {" > $PROMOTION_FILE
+          echo "  source: \"${SOURCE#release/}\"," >> $PROMOTION_FILE
+          echo "  target: \"${TARGET#release/}\"," >> $PROMOTION_FILE
+          echo -n "  proxies: [" >> $PROMOTION_FILE
+          FIRST=true
+          for PROXY in $PROXIES; do
+            if [ "$FIRST" = true ]; then
+              echo -n "\"$PROXY\"" >> $PROMOTION_FILE
+              FIRST=false
+            else
+              echo -n ", \"$PROXY\"" >> $PROMOTION_FILE
+            fi
+          done
+          echo "]" >> $PROMOTION_FILE
+          echo "};" >> $PROMOTION_FILE
+          
+          # Stage the file for commit
+          git add $PROMOTION_FILE
+
             # 6. Commit and Push
             git add .
             if git diff --cached --quiet; then
