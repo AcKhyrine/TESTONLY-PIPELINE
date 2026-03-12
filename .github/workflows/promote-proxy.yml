@@ -488,7 +488,7 @@ permissions:
   pull-requests: write
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # Ensures Node 24 for JS actions
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   promote:
@@ -501,54 +501,64 @@ jobs:
           fetch-depth: 0
 
       - name: Determine Proxies
+        id: proxies
         run: |
           INPUT="${{ github.event.inputs.proxy_name }}"
+          SOURCE="${{ github.event.inputs.source_branch }}"
+          TARGET="${{ github.event.inputs.target_branch }}"
+          
           if [[ "${INPUT^^}" == "ALL" ]]; then
-            # Get all proxy folders inside src/main/apiproxies
-            PROXIES=$(ls src/main/apiproxies)
+              echo "ALL selected"
+              echo "ALL=true" >> $GITHUB_ENV
           else
-            # Split comma-separated proxies and trim spaces
-            PROXIES=$(echo "$INPUT" | tr ',' '\n' | xargs)
+              # Split comma-separated proxies and trim spaces
+              PROXIES=$(echo "$INPUT" | tr ',' '\n' | xargs)
+              echo "PROXIES=$PROXIES" >> $GITHUB_ENV
+              echo "ALL=false" >> $GITHUB_ENV
           fi
-          echo "PROXIES=$PROXIES" >> $GITHUB_ENV
-          echo "Selected proxies: $PROXIES"
 
-      - name: Create Promotion Branch
+      - name: Promote ALL proxies (merge source into target)
+        if: env.ALL == 'true'
+        run: |
+          echo "Merging source branch ${{ github.event.inputs.source_branch }} into target branch ${{ github.event.inputs.target_branch }}"
+          git checkout ${{ github.event.inputs.target_branch }}
+          git pull origin ${{ github.event.inputs.target_branch }}
+          git merge origin/${{ github.event.inputs.source_branch }} -m "Promoting ALL proxies from ${{ github.event.inputs.source_branch }} to ${{ github.event.inputs.target_branch }}"
+          git push origin ${{ github.event.inputs.target_branch }}
+
+          # Optional: create PR instead of direct push if you prefer
+          # gh pr create --title "Promote ALL proxies" --body "Promoting ALL proxies from $SOURCE to $TARGET" --base $TARGET --head $TARGET
+
+      - name: Promote specific proxies (surgical)
+        if: env.ALL == 'false'
         run: |
           BRANCH_NAME="promote/${{ github.run_number }}"
           git checkout -b $BRANCH_NAME
-          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
-      - name: Fetch and Copy Source
-        run: |
           git fetch origin ${{ github.event.inputs.source_branch }}
+
           CHANGED=0
           for PROXY in $PROXIES; do
-            # Checkout each proxy folder from the source branch
-            git checkout origin/${{ github.event.inputs.source_branch }} -- src/main/apiproxies/$PROXY || continue
-            # Check if there are changes for this proxy
-            if ! git diff --quiet HEAD -- src/main/apiproxies/$PROXY; then
-              echo "$PROXY has changes"
-              CHANGED=1
-            fi
+              git checkout origin/${{ github.event.inputs.source_branch }} -- src/main/apiproxies/$PROXY || continue
+              git add src/main/apiproxies/$PROXY
+              if [[ -n "$(git diff --cached --name-only src/main/apiproxies/$PROXY)" ]]; then
+                  echo "$PROXY has changes"
+                  CHANGED=1
+              fi
           done
-          echo "CHANGED=$CHANGED" >> $GITHUB_ENV
 
-      - name: Commit and Push if Changes
-        run: |
-          if [[ "${CHANGED}" == "0" ]]; then
-            echo "No changes detected for any proxies. Skipping commit and PR."
-            exit 0
+          if [[ "$CHANGED" == "0" ]]; then
+              echo "No changes detected for selected proxies. Skipping commit and PR."
+              exit 0
           fi
 
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add .
           git commit -m "Promoting proxies: $PROXIES from ${{ github.event.inputs.source_branch }} to ${{ github.event.inputs.target_branch }}"
           git push origin $BRANCH_NAME
 
-      - name: Create Pull Request
-        if: env.CHANGED == '1'   # Only run if there was a commit
+      - name: Create Pull Request (surgical proxies only)
+        if: env.ALL == 'false' && steps.promote.outputs.CHANGED == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
