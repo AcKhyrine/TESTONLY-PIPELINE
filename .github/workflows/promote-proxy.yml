@@ -456,7 +456,7 @@
 #             --base ${{ github.event.inputs.target_branch }} \
 #             --head ${{ env.BRANCH_NAME }}
 
-name: "Surgical Proxy Promotion"
+name: "Proxy Promotion"
 
 on:
   workflow_dispatch:
@@ -542,11 +542,11 @@ jobs:
                 --head "$PROMO_BRANCH"
 
           else
-              echo "Surgical promotion for: $INPUT"
+              echo "promotion for: $INPUT"
 
               # Checkout target branch as base
               git checkout "$TARGET"
-              PROMO_BRANCH="promote/surgical-${{ github.run_number }}"
+              PROMO_BRANCH="promote/-${{ github.run_number }}"
               git checkout -b "$PROMO_BRANCH"
               git fetch origin "$SOURCE"
 
@@ -557,7 +557,7 @@ jobs:
                   git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: $PROXY not found in $SOURCE"
               done
 
-              # Create promotion-list.js for surgical promotion
+              # Create promotion-list.js for promotion
               PROMOTION_FILE="promotion-list.js"
               echo "module.exports = {" > $PROMOTION_FILE
               echo "  source: \"${SOURCE#release/}\"," >> $PROMOTION_FILE
@@ -575,13 +575,13 @@ jobs:
               if git diff --cached --quiet; then
                   echo "No changes detected. Skipping commit."
               else
-                  git commit -m "Surgical promotion: $INPUT from $SOURCE"
+                  git commit -m "Promotion: $INPUT from $SOURCE"
                   git push origin "$PROMO_BRANCH"
               fi
 
               gh pr create \
-                --title "Surgical Promote: $INPUT ($SOURCE -> $TARGET)" \
-                --body "Automated surgical promotion of specific proxies: **$INPUT** from \`$SOURCE\`." \
+                --title "Promote: $INPUT ($SOURCE -> $TARGET)" \
+                --body "Automated promotion of specific proxies: **$INPUT** from \`$SOURCE\`." \
                 --base "$TARGET" \
                 --head "$PROMO_BRANCH"
           fi
