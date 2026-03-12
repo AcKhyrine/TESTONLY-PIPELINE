@@ -551,30 +551,34 @@ jobs:
               git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: Proxy $PROXY not found in $SOURCE"
             done
 
-            # --- Determine proxies to include in promotion-list.js ---
+           # Determine proxies for promotion
           if [[ "$UPPER_INPUT" == "ALL" ]]; then
-            echo "Mode: Full Promotion. Listing all proxies."
-            # List all proxies in the source branch
-            PROXIES=("ALL")
+            echo "Mode: Full Promotion. Using ALL proxies."
+            PROXIES=("ALL")  # Bash array with single element
           else
             echo "Mode: Surgical Promotion for: $INPUT"
-            PROXIES=$(echo "$INPUT" | tr ',' '\n' | xargs)
+            # Convert comma-separated input into array
+            IFS=',' read -r -a PROXIES <<< "$INPUT"
           fi
           
           # --- Create/update promotion-list.js ---
           PROMOTION_FILE="promotion-list.js"
-          echo "Creating/updating $PROMOTION_FILE..."
           echo "module.exports = {" > $PROMOTION_FILE
           echo "  source: \"${SOURCE#release/}\"," >> $PROMOTION_FILE
           echo "  target: \"${TARGET#release/}\"," >> $PROMOTION_FILE
           
-          # Convert PROXIES array/string into JS array
-          PROXIES_JS=$(printf '"%s",' "${PROXIES[@]}")
-          PROXIES_JS="[${PROXIES_JS%,}]"  # remove trailing comma
+          # Build JS array safely
+          PROXIES_JS="["
+          for PROXY in "${PROXIES[@]}"; do
+            PROXIES_JS+="\"$PROXY\", "
+          done
+          # Remove trailing comma and space
+          PROXIES_JS="${PROXIES_JS%, }"
+          PROXIES_JS+="]"
           
           echo "  proxies: $PROXIES_JS" >> $PROMOTION_FILE
           echo "};" >> $PROMOTION_FILE
-          
+
           git add $PROMOTION_FILE
 
             # 6. Commit and Push
