@@ -490,96 +490,98 @@ jobs:
   promote:
     runs-on: ubuntu-latest
     env:
-      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Handle Promotion Logic
         run: |
-          # --- Setup Variables ---
+          # Setup variables
           INPUT="${{ github.event.inputs.proxy_name }}"
           SOURCE="${{ github.event.inputs.source_branch }}"
           TARGET="${{ github.event.inputs.target_branch }}"
-
-          # Standardize input
-          INPUT=$(echo "$INPUT" | xargs)  # trim spaces
+          INPUT=$(echo "$INPUT" | xargs)
           UPPER_INPUT=$(echo "$INPUT" | tr '[:lower:]' '[:upper:]')
 
-          echo "DEBUG: Original input: '$INPUT'"
-          echo "DEBUG: Uppercase input: '$UPPER_INPUT'"
-          echo "DEBUG: Source branch: $SOURCE"
-          echo "DEBUG: Target branch: $TARGET"
+          echo "DEBUG: Input: $INPUT"
+          echo "DEBUG: Source: $SOURCE"
+          echo "DEBUG: Target: $TARGET"
 
-          # --- Determine proxies array ---
-          if [[ "$UPPER_INPUT" == "ALL" ]]; then
-              echo "DEBUG: Full Promotion detected."
-              PROXIES=("ALL")
-          else
-              echo "DEBUG: Surgical Promotion detected."
-              IFS=',' read -r -a PROXIES <<< "$INPUT"
-          fi
-
-          echo "DEBUG: PROXIES array: ${PROXIES[@]}"
-
-          # --- Checkout target branch to start promotion branch ---
+          # Configure git
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git checkout "$TARGET"
 
-          # Create a unique promotion branch
           if [[ "$UPPER_INPUT" == "ALL" ]]; then
-              BRANCH_NAME="promote/full-${{ github.run_number }}"
-          else
-              BRANCH_NAME="promote/surgical-${{ github.run_number }}"
-          fi
-          git checkout -b "$BRANCH_NAME"
+              echo "Full promotion: copying all from source branch"
 
-          # --- For surgical promotion: cherry-pick specific proxies ---
-          if [[ "$UPPER_INPUT" != "ALL" ]]; then
+              # Create a new branch based on the source branch
+              PROMO_BRANCH="promote/full-${{ github.run_number }}"
               git fetch origin "$SOURCE"
-              for PROXY in "${PROXIES[@]}"; do
-                  echo "Cherry-picking $PROXY from $SOURCE..."
-                  git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: Proxy $PROXY not found in $SOURCE"
-              done
-          fi
+              git checkout -b "$PROMO_BRANCH" "origin/$SOURCE"
 
-          # --- Create/update promotion-list.js ---
-          PROMOTION_FILE="promotion-list.js"
-          echo "DEBUG: Creating/updating $PROMOTION_FILE"
-          echo "module.exports = {" > $PROMOTION_FILE
-          echo "  source: \"${SOURCE#release/}\"," >> $PROMOTION_FILE
-          echo "  target: \"${TARGET#release/}\"," >> $PROMOTION_FILE
+              # Create promotion-list.js with ALL proxies
+              PROMOTION_FILE="promotion-list.js"
+              echo "module.exports = {" > $PROMOTION_FILE
+              echo "  source: \"${SOURCE#release/}\"," >> $PROMOTION_FILE
+              echo "  target: \"${TARGET#release/}\"," >> $PROMOTION_FILE
+              echo "  proxies: [\"ALL\"]" >> $PROMOTION_FILE
+              echo "};" >> $PROMOTION_FILE
 
-          PROXIES_JS="["
-          for PROXY in "${PROXIES[@]}"; do
-            PROXIES_JS+="\"$PROXY\", "
-          done
-          PROXIES_JS="${PROXIES_JS%, }"
-          PROXIES_JS+="]"
+              git add $PROMOTION_FILE
+              git commit -m "Full promotion: add promotion-list.js"
 
-          echo "  proxies: $PROXIES_JS" >> $PROMOTION_FILE
-          echo "};" >> $PROMOTION_FILE
+              git push origin "$PROMO_BRANCH"
 
-          echo "DEBUG: Contents of $PROMOTION_FILE:"
-          cat $PROMOTION_FILE
+              gh pr create \
+                --title "Full Promotion: $SOURCE -> $TARGET" \
+                --body "Automated full promotion from \`$SOURCE\` to \`$TARGET\` including promotion-list.js" \
+                --base "$TARGET" \
+                --head "$PROMO_BRANCH"
 
-          git add $PROMOTION_FILE
-
-          # --- Commit & push promotion branch ---
-          if git diff --cached --quiet; then
-            echo "No changes detected. Proxies are already identical between branches."
           else
-            git commit -m "Promotion: $INPUT from $SOURCE"
-            git push origin "$BRANCH_NAME"
-          fi
+              echo "Surgical promotion for: $INPUT"
 
-          # --- Create Pull Request ---
-          gh pr create \
-            --title "Promotion: $INPUT ($SOURCE -> $TARGET)" \
-            --body "Automated promotion of proxies: **$INPUT** from \`$SOURCE\` to \`$TARGET\`." \
-            --base "$TARGET" \
-            --head "$BRANCH_NAME"
+              # Checkout target branch as base
+              git checkout "$TARGET"
+              PROMO_BRANCH="promote/surgical-${{ github.run_number }}"
+              git checkout -b "$PROMO_BRANCH"
+              git fetch origin "$SOURCE"
+
+              # Pull only selected proxies
+              IFS=',' read -r -a PROXIES <<< "$INPUT"
+              for PROXY in "${PROXIES[@]}"; do
+                  echo "Cherry-picking $PROXY from $SOURCE"
+                  git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: $PROXY not found in $SOURCE"
+              done
+
+              # Create promotion-list.js for surgical promotion
+              PROMOTION_FILE="promotion-list.js"
+              echo "module.exports = {" > $PROMOTION_FILE
+              echo "  source: \"${SOURCE#release/}\"," >> $PROMOTION_FILE
+              echo "  target: \"${TARGET#release/}\"," >> $PROMOTION_FILE
+              PROXIES_JS="["
+              for PROXY in "${PROXIES[@]}"; do
+                  PROXIES_JS+="\"$PROXY\", "
+              done
+              PROXIES_JS="${PROXIES_JS%, }]"
+              echo "  proxies: $PROXIES_JS" >> $PROMOTION_FILE
+              echo "};" >> $PROMOTION_FILE
+
+              git add $PROMOTION_FILE
+
+              if git diff --cached --quiet; then
+                  echo "No changes detected. Skipping commit."
+              else
+                  git commit -m "Surgical promotion: $INPUT from $SOURCE"
+                  git push origin "$PROMO_BRANCH"
+              fi
+
+              gh pr create \
+                --title "Surgical Promote: $INPUT ($SOURCE -> $TARGET)" \
+                --body "Automated surgical promotion of specific proxies: **$INPUT** from \`$SOURCE\`." \
+                --base "$TARGET" \
+                --head "$PROMO_BRANCH"
+          fi
