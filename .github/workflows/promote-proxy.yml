@@ -367,6 +367,96 @@
 #             --head ${{ env.BRANCH_NAME }}
 
 # multiple proxies / all proxies
+# name: "Surgical Proxy Promotion"
+
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       proxy_name:
+#         description: 'Name(s) of the proxy to promote (comma-separated) or ALL'
+#         required: true
+#         type: string
+#       source_branch:
+#         description: 'Branch to pull code FROM'
+#         required: true
+#         default: 'release/sit'
+#         type: choice
+#         options:
+#           - release/sit
+#           - release/uat
+#       target_branch:
+#         description: 'Branch to merge code INTO'
+#         required: true
+#         default: 'release/uat'
+#         type: choice
+#         options:
+#           - release/uat
+#           - main
+
+# permissions:
+#   contents: write
+#   pull-requests: write
+
+# jobs:
+#   promote:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout Target (The Base)
+#         uses: actions/checkout@v6
+#         with:
+#           ref: ${{ github.event.inputs.target_branch }}
+#           fetch-depth: 0
+
+#       - name: Determine Proxies
+#         run: |
+#           INPUT="${{ github.event.inputs.proxy_name }}"
+#           if [[ "${INPUT^^}" == "ALL" ]]; then
+#             # Get all proxy folders inside src/main/apiproxies
+#             PROXIES=$(ls src/main/apiproxies)
+#           else
+#             # Split comma-separated proxies and trim spaces
+#             PROXIES=$(echo "$INPUT" | tr ',' '\n' | xargs)
+#           fi
+#           echo "PROXIES=$PROXIES" >> $GITHUB_ENV
+#           echo "Selected proxies: $PROXIES"
+
+#       - name: Create Promotion Branch
+#         run: |
+#           BRANCH_NAME="promote/${{ github.run_number }}"
+#           git checkout -b $BRANCH_NAME
+#           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+#       - name: Fetch and Copy Source
+#         run: |
+#           git fetch origin ${{ github.event.inputs.source_branch }}
+#           for PROXY in $PROXIES; do
+#             echo "Pulling $PROXY from ${{ github.event.inputs.source_branch }}"
+#             git checkout origin/${{ github.event.inputs.source_branch }} -- src/main/apiproxies/$PROXY
+#           done
+
+#       - name: Commit and Push
+#         run: |
+#           git config user.name "github-actions"
+#           git config user.email "github-actions@github.com"
+#           git add .
+#           if git diff --cached --quiet; then
+#             echo "No changes detected. Proxies are already up to date."
+#             exit 0
+#           fi
+#           git commit -m "Promoting proxies: $PROXIES from ${{ github.event.inputs.source_branch }} to ${{ github.event.inputs.target_branch }}"
+#           git push origin ${{ env.BRANCH_NAME }}
+
+#       - name: Create Pull Request
+#         env:
+#           GH_TOKEN: ${{ github.token }}
+#         run: |
+#           gh pr create \
+#             --title "Promote proxies: $PROXIES (${{ github.event.inputs.source_branch }} -> ${{ github.event.inputs.target_branch }})" \
+#             --body "Automated surgical promotion of proxies: **$PROXIES** pulled from \`${{ github.event.inputs.source_branch }}\` into \`${{ github.event.inputs.target_branch }}\`." \
+#             --base ${{ github.event.inputs.target_branch }} \
+#             --head ${{ env.BRANCH_NAME }}
+
+
 name: "Surgical Proxy Promotion"
 
 on:
@@ -396,6 +486,9 @@ on:
 permissions:
   contents: write
   pull-requests: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # Ensures Node 24 for JS actions
 
 jobs:
   promote:
@@ -429,24 +522,33 @@ jobs:
       - name: Fetch and Copy Source
         run: |
           git fetch origin ${{ github.event.inputs.source_branch }}
+          CHANGED=0
           for PROXY in $PROXIES; do
-            echo "Pulling $PROXY from ${{ github.event.inputs.source_branch }}"
-            git checkout origin/${{ github.event.inputs.source_branch }} -- src/main/apiproxies/$PROXY
+            # Checkout each proxy folder from the source branch
+            git checkout origin/${{ github.event.inputs.source_branch }} -- src/main/apiproxies/$PROXY || continue
+            # Check if there are changes for this proxy
+            if ! git diff --quiet HEAD -- src/main/apiproxies/$PROXY; then
+              echo "$PROXY has changes"
+              CHANGED=1
+            fi
           done
+          echo "CHANGED=$CHANGED" >> $GITHUB_ENV
 
-      - name: Commit and Push
+      - name: Commit and Push if Changes
         run: |
+          if [[ "${CHANGED}" == "0" ]]; then
+            echo "No changes detected for any proxies. Skipping commit and PR."
+            exit 0
+          fi
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add .
-          if git diff --cached --quiet; then
-            echo "No changes detected. Proxies are already up to date."
-            exit 0
-          fi
           git commit -m "Promoting proxies: $PROXIES from ${{ github.event.inputs.source_branch }} to ${{ github.event.inputs.target_branch }}"
-          git push origin ${{ env.BRANCH_NAME }}
+          git push origin $BRANCH_NAME
 
       - name: Create Pull Request
+        if: env.CHANGED == '1'   # Only run if there was a commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -454,6 +556,4 @@ jobs:
             --title "Promote proxies: $PROXIES (${{ github.event.inputs.source_branch }} -> ${{ github.event.inputs.target_branch }})" \
             --body "Automated surgical promotion of proxies: **$PROXIES** pulled from \`${{ github.event.inputs.source_branch }}\` into \`${{ github.event.inputs.target_branch }}\`." \
             --base ${{ github.event.inputs.target_branch }} \
-            --head ${{ env.BRANCH_NAME }}
-
-
+            --head $BRANCH_NAME
