@@ -550,12 +550,24 @@ jobs:
               git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: Proxy $PROXY not found in $SOURCE"
             done
 
-            # Create/Update promotion-list.js
-          echo "Creating promotion-list.js..."
+            # --- Determine proxies to include in promotion-list.js ---
+          if [[ "$UPPER_INPUT" == "ALL" ]]; then
+            echo "Mode: Full Promotion. Listing all proxies."
+            # List all proxies in the source branch
+            PROXIES=$(git ls-tree --name-only -d "origin/$SOURCE" "src/main/apiproxies" | xargs)
+          else
+            echo "Mode: Surgical Promotion for: $INPUT"
+            PROXIES=$(echo "$INPUT" | tr ',' '\n' | xargs)
+          fi
+          
+          # --- Create/update promotion-list.js ---
           PROMOTION_FILE="promotion-list.js"
+          echo "Creating/updating $PROMOTION_FILE..."
           echo "module.exports = {" > $PROMOTION_FILE
           echo "  source: \"${SOURCE#release/}\"," >> $PROMOTION_FILE
           echo "  target: \"${TARGET#release/}\"," >> $PROMOTION_FILE
+          
+          # Add proxies array
           echo -n "  proxies: [" >> $PROMOTION_FILE
           FIRST=true
           for PROXY in $PROXIES; do
@@ -569,7 +581,6 @@ jobs:
           echo "]" >> $PROMOTION_FILE
           echo "};" >> $PROMOTION_FILE
           
-          # Stage the file for commit
           git add $PROMOTION_FILE
 
             # 6. Commit and Push
