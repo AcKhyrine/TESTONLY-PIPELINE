@@ -1,5 +1,5 @@
 module.exports = {
   source: "sit",
   target: "uat",
-  proxies: ["proxy11"]
+  proxies: ["proxy111"]
 };
