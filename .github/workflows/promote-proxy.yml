@@ -554,7 +554,7 @@ jobs:
           if [[ "$UPPER_INPUT" == "ALL" ]]; then
             echo "Mode: Full Promotion. Listing all proxies."
             # List all proxies in the source branch
-            PROXIES=$(git ls-tree --name-only -d "origin/$SOURCE" "src/main/apiproxies" | xargs)
+            PROXIES=("ALL")
           else
             echo "Mode: Surgical Promotion for: $INPUT"
             PROXIES=$(echo "$INPUT" | tr ',' '\n' | xargs)
