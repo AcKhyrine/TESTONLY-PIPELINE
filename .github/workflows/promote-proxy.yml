@@ -557,11 +557,19 @@ jobs:
                   git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: $PROXY not found in $SOURCE"
               done
 
+              TARGET_VALUE="${TARGET#release/}"
+
+              if [ "$TARGET" = "main" ]; then
+                  FINAL_TARGET="prod"
+              else
+                  FINAL_TARGET="$TARGET_VALUE"
+              fi
+          
               # Create promotion-list.js for promotion
               PROMOTION_FILE="promotion-list.js"
               echo "module.exports = {" > $PROMOTION_FILE
               echo "  source: \"${SOURCE#release/}\"," >> $PROMOTION_FILE
-              echo "  target: \"${TARGET#release/}\"," >> $PROMOTION_FILE
+              echo "  target: \"$FINAL_TARGET\"," >> $PROMOTION_FILE
               PROXIES_JS="["
               for PROXY in "${PROXIES[@]}"; do
                   PROXIES_JS+="\"$PROXY\", "
