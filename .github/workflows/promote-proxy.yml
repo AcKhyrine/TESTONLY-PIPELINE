@@ -525,6 +525,28 @@ jobs:
 
           echo "DEBUG: PROXIES array: ${PROXIES[@]}"
 
+          # --- Checkout target branch to start promotion branch ---
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git checkout "$TARGET"
+
+          # Create a unique promotion branch
+          if [[ "$UPPER_INPUT" == "ALL" ]]; then
+              BRANCH_NAME="promote/full-${{ github.run_number }}"
+          else
+              BRANCH_NAME="promote/surgical-${{ github.run_number }}"
+          fi
+          git checkout -b "$BRANCH_NAME"
+
+          # --- For surgical promotion: cherry-pick specific proxies ---
+          if [[ "$UPPER_INPUT" != "ALL" ]]; then
+              git fetch origin "$SOURCE"
+              for PROXY in "${PROXIES[@]}"; do
+                  echo "Cherry-picking $PROXY from $SOURCE..."
+                  git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: Proxy $PROXY not found in $SOURCE"
+              done
+          fi
+
           # --- Create/update promotion-list.js ---
           PROMOTION_FILE="promotion-list.js"
           echo "DEBUG: Creating/updating $PROMOTION_FILE"
@@ -547,52 +569,17 @@ jobs:
 
           git add $PROMOTION_FILE
 
-          # --- Full Promotion: create PR if not exists ---
-          if [[ "$UPPER_INPUT" == "ALL" ]]; then
-              echo "Mode: Full Promotion. Creating PR from $SOURCE to $TARGET."
-              
-              PR_EXISTS=$(gh pr list --head "$SOURCE" --base "$TARGET" --state open --json number -q '.[0].number')
-              
-              if [ -z "$PR_EXISTS" ]; then
-                gh pr create \
-                  --title "Full Promotion: $SOURCE -> $TARGET" \
-                  --body "Automated PR to merge **all** changes from \`$SOURCE\` into \`$TARGET\`." \
-                  --base "$TARGET" \
-                  --head "$SOURCE"
-              else
-                echo "Existing PR found: #$PR_EXISTS. No new PR created."
-              fi
-
-          # --- Surgical Promotion: cherry-pick specific proxies ---
+          # --- Commit & push promotion branch ---
+          if git diff --cached --quiet; then
+            echo "No changes detected. Proxies are already identical between branches."
           else
-              echo "Mode: Surgical Promotion for: $INPUT"
-              
-              git config user.name "github-actions"
-              git config user.email "github-actions@github.com"
-
-              git checkout "$TARGET"
-              BRANCH_NAME="promote/surgical-${{ github.run_number }}"
-              git checkout -b "$BRANCH_NAME"
-              git fetch origin "$SOURCE"
-
-              for PROXY in "${PROXIES[@]}"; do
-                echo "Cherry-picking $PROXY from $SOURCE..."
-                git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: Proxy $PROXY not found in $SOURCE"
-              done
-
-              # Commit & push
-              if git diff --cached --quiet; then
-                echo "No changes detected. Proxies are already identical between branches."
-                exit 0
-              fi
-
-              git commit -m "Surgical promotion: $INPUT from $SOURCE"
-              git push origin "$BRANCH_NAME"
-
-              # Create PR
-              gh pr create \
-                --title "Surgical Promote: $INPUT ($SOURCE -> $TARGET)" \
-                --body "Automated surgical promotion of specific proxies: **$INPUT** from \`$SOURCE\`." \
-                --base "$TARGET" \
-                --head "$BRANCH_NAME"
+            git commit -m "Promotion: $INPUT from $SOURCE"
+            git push origin "$BRANCH_NAME"
           fi
+
+          # --- Create Pull Request ---
+          gh pr create \
+            --title "Promotion: $INPUT ($SOURCE -> $TARGET)" \
+            --body "Automated promotion of proxies: **$INPUT** from \`$SOURCE\` to \`$TARGET\`." \
+            --base "$TARGET" \
+            --head "$BRANCH_NAME"
