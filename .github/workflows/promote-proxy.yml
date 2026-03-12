@@ -397,12 +397,15 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   promote:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Target (The Base)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.13.0
         with:
           ref: ${{ github.event.inputs.target_branch }}
           fetch-depth: 0
