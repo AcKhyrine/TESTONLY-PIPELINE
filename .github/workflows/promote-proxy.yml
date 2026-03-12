@@ -490,58 +490,80 @@ jobs:
   promote:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.target_branch }}
           fetch-depth: 0
 
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
-      - name: Full Merge (If ALL)
-        if: ${{ github.event.inputs.proxy_name == 'ALL' || github.event.inputs.proxy_name == 'all' }}
-        run: |
-          echo "Promoting ALL: Merging ${{ github.event.inputs.source_branch }} into ${{ github.event.inputs.target_branch }}"
-          git fetch origin ${{ github.event.inputs.source_branch }}
-          git merge origin/${{ github.event.inputs.source_branch }} --no-ff -m "Merge all proxies from ${{ github.event.inputs.source_branch }}"
-          git push origin ${{ github.event.inputs.target_branch }}
-
-      - name: Surgical Promotion (If Specific Proxies)
-        if: ${{ github.event.inputs.proxy_name != 'ALL' && github.event.inputs.proxy_name != 'all' }}
+      - name: Handle Promotion Logic
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 1. Prepare proxies list
+          # Setup Variables
           INPUT="${{ github.event.inputs.proxy_name }}"
-          PROXIES=$(echo "$INPUT" | tr ',' '\n' | xargs)
+          SOURCE="${{ github.event.inputs.source_branch }}"
+          TARGET="${{ github.event.inputs.target_branch }}"
           
-          # 2. Create promotion branch
-          BRANCH_NAME="promote/${{ github.run_number }}"
-          git checkout -b $BRANCH_NAME
-          
-          # 3. Fetch and Copy specific proxy folders
-          git fetch origin ${{ github.event.inputs.source_branch }}
-          for PROXY in $PROXIES; do
-            echo "Pulling $PROXY from ${{ github.event.inputs.source_branch }}"
-            git checkout origin/${{ github.event.inputs.source_branch }} -- src/main/apiproxies/$PROXY
-          done
-          
-          # 4. Commit and Push
-          git add .
-          if git diff --cached --quiet; then
-            echo "No changes detected."
-            exit 0
+          # Standardize input to uppercase for comparison
+          UPPER_INPUT=$(echo "$INPUT" | tr '[:lower:]' '[:upper:]')
+
+          # --- CASE 1: FULL PROMOTION (ALL) ---
+          if [[ "$UPPER_INPUT" == "ALL" ]]; then
+            echo "Mode: Full Promotion. Creating PR from $SOURCE to $TARGET."
+            
+            # Check if a PR already exists between these branches
+            PR_EXISTS=$(gh pr list --head "$SOURCE" --base "$TARGET" --state open --json number -q '.[0].number')
+            
+            if [ -z "$PR_EXISTS" ]; then
+              gh pr create \
+                --title "Full Promotion: $SOURCE -> $TARGET" \
+                --body "Automated PR to merge **all** changes from \`$SOURCE\` into \`$TARGET\`." \
+                --base "$TARGET" \
+                --head "$SOURCE"
+            else
+              echo "Existing PR found: #$PR_EXISTS. No new PR created."
+            fi
+
+          # --- CASE 2: SURGICAL PROMOTION (SPECIFIC PROXIES) ---
+          else
+            echo "Mode: Surgical Promotion for: $INPUT"
+            
+            # 1. Configure Git
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+
+            # 2. Checkout the Target branch first to use as a base
+            git checkout "$TARGET"
+            
+            # 3. Create a unique promotion branch
+            BRANCH_NAME="promote/surgical-${{ github.run_number }}"
+            git checkout -b "$BRANCH_NAME"
+            
+            # 4. Fetch the source branch
+            git fetch origin "$SOURCE"
+            
+            # 5. Loop through proxies and pull them individually
+            PROXIES=$(echo "$INPUT" | tr ',' '\n' | xargs)
+            for PROXY in $PROXIES; do
+              echo "Cherry-picking $PROXY from $SOURCE..."
+              # This specifically pulls the folder from the source branch into our current branch
+              git checkout "origin/$SOURCE" -- "src/main/apiproxies/$PROXY" || echo "Warning: Proxy $PROXY not found in $SOURCE"
+            done
+
+            # 6. Commit and Push
+            git add .
+            if git diff --cached --quiet; then
+              echo "No changes detected. Proxies are already identical between branches."
+              exit 0
+            fi
+
+            git commit -m "Surgical promotion: $INPUT from $SOURCE"
+            git push origin "$BRANCH_NAME"
+
+            # 7. Create the Pull Request for the new branch
+            gh pr create \
+              --title "Surgical Promote: $INPUT ($SOURCE -> $TARGET)" \
+              --body "Automated surgical promotion of specific proxies: **$INPUT** from \`$SOURCE\`." \
+              --base "$TARGET" \
+              --head "$BRANCH_NAME"
           fi
-          
-          git commit -m "Surgical promotion of $INPUT"
-          git push origin $BRANCH_NAME
-          
-          # 5. Create Pull Request
-          gh pr create \
-            --title "Promote proxies: $INPUT (${{ github.event.inputs.source_branch }} -> ${{ github.event.inputs.target_branch }})" \
-            --body "Automated surgical promotion of: **$INPUT**" \
-            --base ${{ github.event.inputs.target_branch }} \
-            --head $BRANCH_NAME
